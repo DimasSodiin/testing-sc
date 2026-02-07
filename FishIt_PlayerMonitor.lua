@@ -1,6 +1,6 @@
 -- Fish It Player Monitor with Discord Webhook
--- Enhanced Version with Fishing Status Detection
--- FIXED: Added ScrollingFrame + Fishing Activity Monitor
+-- Enhanced Version with ACCURATE Fishing Detection
+-- FIXED: Proper fishing detection for Fish It game
 -- Compatible with Delta Executor
 
 local Players = game:GetService("Players")
@@ -22,86 +22,187 @@ local isMinimized = false
 -- Fishing Detection Variables
 local playerFishCounts = {} -- Track fish count per player
 local playerFishingStatus = {} -- Track if player is actively fishing
-local FISHING_CHECK_INTERVAL = 5 -- Check every 5 seconds
+local FISHING_CHECK_INTERVAL = 3 -- Check every 3 seconds
 
 -- Responsive Design Variables
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local baseSize = isMobile and 0.85 or 1
 
--- Function to get player's fish count from inventory
+-- Function to get player's fish count from inventory - IMPROVED VERSION
 local function getPlayerFishCount(player)
-    local success, fishCount = pcall(function()
-        -- Try to access player's inventory/backpack for fish items
-        local backpack = player:FindFirstChild("Backpack")
-        local character = player.Character
-        
-        local totalFish = 0
-        
-        -- Method 1: Check Backpack for fish tools
-        if backpack then
-            for _, item in pairs(backpack:GetChildren()) do
-                if item:IsA("Tool") and (item.Name:lower():find("fish") or item.Name:lower():find("salmon") or item.Name:lower():find("tuna")) then
-                    totalFish = totalFish + 1
-                end
+    local totalFish = 0
+    
+    local success, result = pcall(function()
+        -- Method 1: Check for FishIt leaderstats (most common)
+        local leaderstats = player:FindFirstChild("leaderstats")
+        if leaderstats then
+            -- Try different possible fish stat names
+            local fishStat = leaderstats:FindFirstChild("Fish") 
+                or leaderstats:FindFirstChild("TotalFish") 
+                or leaderstats:FindFirstChild("FishCaught")
+                or leaderstats:FindFirstChild("🐟")
+            
+            if fishStat and (fishStat:IsA("IntValue") or fishStat:IsA("NumberValue")) then
+                print("[DEBUG] " .. player.Name .. " fish from leaderstats: " .. fishStat.Value)
+                return fishStat.Value
             end
         end
         
-        -- Method 2: Check Character for equipped fish
-        if character then
-            for _, item in pairs(character:GetChildren()) do
-                if item:IsA("Tool") and (item.Name:lower():find("fish") or item.Name:lower():find("salmon") or item.Name:lower():find("tuna")) then
-                    totalFish = totalFish + 1
-                end
+        -- Method 2: Check PlayerData folder
+        local playerData = player:FindFirstChild("Data") or player:FindFirstChild("PlayerData")
+        if playerData then
+            local fishValue = playerData:FindFirstChild("Fish") 
+                or playerData:FindFirstChild("TotalFish")
+                or playerData:FindFirstChild("FishCaught")
+            
+            if fishValue and (fishValue:IsA("IntValue") or fishValue:IsA("NumberValue")) then
+                print("[DEBUG] " .. player.Name .. " fish from PlayerData: " .. fishValue.Value)
+                return fishValue.Value
             end
         end
         
-        -- Method 3: Try to access PlayerData/Stats if available (Fish It specific)
+        -- Method 3: Check PlayerGui for UI elements
         local playerGui = player:FindFirstChild("PlayerGui")
         if playerGui then
-            -- Try to find Fish It UI elements that might show fish count
-            local mainUI = playerGui:FindFirstChild("MainUI") or playerGui:FindFirstChild("HUD")
-            if mainUI then
-                -- Search for any TextLabels that might contain fish count
-                for _, descendant in pairs(mainUI:GetDescendants()) do
-                    if descendant:IsA("TextLabel") then
+            -- Search through all GUIs for fish count displays
+            for _, gui in pairs(playerGui:GetChildren()) do
+                for _, descendant in pairs(gui:GetDescendants()) do
+                    if descendant:IsA("TextLabel") or descendant:IsA("TextBox") then
                         local text = descendant.Text
-                        -- Look for patterns like "Fish: 15" or "15 Fish"
-                        local fishNum = text:match("(%d+)%s*[Ff]ish") or text:match("[Ff]ish%s*:?%s*(%d+)")
-                        if fishNum then
-                            totalFish = tonumber(fishNum) or totalFish
+                        -- Look for patterns like "Fish: 15", "15 Fish", "🐟 15"
+                        local fishNum = tonumber(text:match("(%d+)%s*[Ff]ish")) 
+                            or tonumber(text:match("[Ff]ish%s*:?%s*(%d+)"))
+                            or tonumber(text:match("🐟%s*:?%s*(%d+)"))
+                            or tonumber(text:match("(%d+)%s*🐟"))
+                        
+                        if fishNum and fishNum > 0 then
+                            print("[DEBUG] " .. player.Name .. " fish from GUI: " .. fishNum)
+                            return fishNum
                         end
                     end
                 end
             end
         end
         
-        -- Method 4: Check for FishIt specific data structure
-        local playerData = player:FindFirstChild("Data") or player:FindFirstChild("PlayerData") or player:FindFirstChild("leaderstats")
-        if playerData then
-            local fishValue = playerData:FindFirstChild("Fish") or playerData:FindFirstChild("TotalFish") or playerData:FindFirstChild("FishCaught")
-            if fishValue and (fishValue:IsA("IntValue") or fishValue:IsA("NumberValue")) then
-                totalFish = fishValue.Value
+        -- Method 4: Check Character for fishing rod or animation
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                -- Check if player is holding a fishing rod
+                for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+                    if track.Animation and track.Animation.AnimationId then
+                        local animId = track.Animation.AnimationId:lower()
+                        if animId:find("fish") or animId:find("cast") or animId:find("reel") then
+                            print("[DEBUG] " .. player.Name .. " has fishing animation active!")
+                            -- Return special flag to indicate active fishing
+                            return -1 -- Special value for active animation
+                        end
+                    end
+                end
             end
         end
         
-        return totalFish
+        return 0
     end)
     
     if success then
-        return fishCount
+        return result or totalFish
     else
-        return 0
+        return totalFish
     end
+end
+
+-- Function to check if player is actively fishing (holding rod, in water, etc)
+local function isPlayerActivelyFishing(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then return false end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if not humanoid or not rootPart then return false end
+        
+        -- Check 1: Is player holding a fishing rod tool?
+        local tool = character:FindFirstChildOfClass("Tool")
+        if tool then
+            local toolName = tool.Name:lower()
+            if toolName:find("rod") or toolName:find("fish") or toolName:find("pole") then
+                print("[DEBUG] " .. player.Name .. " is holding fishing rod: " .. tool.Name)
+                return true
+            end
+        end
+        
+        -- Check 2: Check backpack for equipped rod
+        local backpack = player:FindFirstChild("Backpack")
+        if backpack then
+            for _, item in pairs(backpack:GetChildren()) do
+                if item:IsA("Tool") then
+                    local itemName = item.Name:lower()
+                    if itemName:find("rod") or itemName:find("fish") or itemName:find("pole") then
+                        -- Rod in backpack but check if recently used
+                        local lastUsed = item:GetAttribute("LastUsed")
+                        if lastUsed and (tick() - lastUsed) < 10 then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Check 3: Animation check
+        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+            if track.Animation and track.Animation.AnimationId then
+                local animId = track.Animation.AnimationId:lower()
+                if animId:find("fish") or animId:find("cast") or animId:find("reel") or animId:find("rod") then
+                    print("[DEBUG] " .. player.Name .. " has fishing animation playing")
+                    return true
+                end
+            end
+        end
+        
+        -- Check 4: Look for fishing-related parts attached to character
+        for _, child in pairs(character:GetDescendants()) do
+            if child:IsA("BasePart") then
+                local partName = child.Name:lower()
+                if partName:find("rod") or partName:find("line") or partName:find("bobber") or partName:find("float") then
+                    print("[DEBUG] " .. player.Name .. " has fishing part attached: " .. child.Name)
+                    return true
+                end
+            end
+        end
+        
+        return false
+    end)
+    
+    return success and result or false
 end
 
 -- Function to update fishing status for a player
 local function updateFishingStatus(player)
     local currentFishCount = getPlayerFishCount(player)
     local previousFishCount = playerFishCounts[player.UserId] or 0
+    local isActivelyFishing = isPlayerActivelyFishing(player)
     
-    -- Player is considered fishing if their fish count increased
-    if currentFishCount > previousFishCount then
-        print("[FISHING DETECTED] " .. player.Name .. " is fishing! Fish: " .. previousFishCount .. " -> " .. currentFishCount)
+    -- Special case: -1 means active animation detected
+    if currentFishCount == -1 then
+        isActivelyFishing = true
+        currentFishCount = previousFishCount -- Keep previous count
+    end
+    
+    -- Primary detection: Check if actively using fishing rod
+    if isActivelyFishing then
+        print("[FISHING] " .. player.Name .. " is ACTIVELY FISHING (rod/animation detected)")
+        playerFishingStatus[player.UserId] = {
+            isFishing = true,
+            lastUpdate = tick(),
+            fishCount = currentFishCount,
+            fishGained = 0
+        }
+    -- Secondary detection: Fish count increased
+    elseif currentFishCount > previousFishCount then
+        print("[FISHING] " .. player.Name .. " caught fish! " .. previousFishCount .. " -> " .. currentFishCount)
         playerFishingStatus[player.UserId] = {
             isFishing = true,
             lastUpdate = tick(),
@@ -109,16 +210,16 @@ local function updateFishingStatus(player)
             fishGained = currentFishCount - previousFishCount
         }
     else
-        -- Check if last activity was recent (within 30 seconds)
+        -- Check if last activity was recent (within 15 seconds)
         local status = playerFishingStatus[player.UserId]
-        if status and (tick() - status.lastUpdate) < 30 then
+        if status and (tick() - status.lastUpdate) < 15 then
             -- Still consider them fishing if recently active
             status.isFishing = true
             status.fishCount = currentFishCount
         elseif status then
-            -- Mark as inactive (NOT fishing)
+            -- Mark as NOT fishing (IDLE)
             if status.isFishing then
-                print("[IDLE DETECTED] " .. player.Name .. " stopped fishing. Fish count: " .. currentFishCount)
+                print("[IDLE] " .. player.Name .. " is now IDLE (stopped fishing)")
             end
             status.isFishing = false
             status.fishCount = currentFishCount
@@ -558,7 +659,7 @@ local function updatePlayerListDisplay(gui)
         
         local PlayerEntry = Instance.new("Frame")
         PlayerEntry.Name = "Player_" .. player.Name
-        -- Hijau jika sedang mancing, abu-abu jika idle
+        -- HIJAU untuk yang MANCING, ABU-ABU untuk yang IDLE
         PlayerEntry.BackgroundColor3 = isFishing and Color3.fromRGB(35, 65, 35) or Color3.fromRGB(45, 45, 60)
         PlayerEntry.BorderSizePixel = 0
         PlayerEntry.Size = UDim2.new(1, 0, 0, 35)
@@ -568,7 +669,7 @@ local function updatePlayerListDisplay(gui)
         EntryCorner.CornerRadius = UDim.new(0, 4)
         EntryCorner.Parent = PlayerEntry
         
-        -- Fishing indicator - 🎣 untuk yang mancing, 💤 untuk yang idle
+        -- 🎣 untuk yang MANCING, 💤 untuk yang IDLE
         local FishingIndicator = Instance.new("TextLabel")
         FishingIndicator.BackgroundTransparency = 1
         FishingIndicator.Position = UDim2.new(0, 5, 0, 0)
@@ -860,7 +961,7 @@ spawn(function()
     end
 end)
 
--- Monitor fishing status every 5 seconds
+-- Monitor fishing status every 3 seconds
 spawn(function()
     while wait(FISHING_CHECK_INTERVAL) do
         if gui.ScreenGui.Parent then
@@ -946,9 +1047,16 @@ updatePlayerListDisplay(gui)
 
 -- Success notification
 wait(0.1)
-showNotification("✅ Fish It Monitor", "Fishing detection enabled! 🎣", 5)
+showNotification("✅ Fish It Monitor", "Advanced fishing detection enabled! 🎣", 5)
 
-print("Fish It Player Monitor with Fishing Detection loaded!")
-print("✅ Detects active fishing based on fish count changes")
-print("🎣 Shows fishing status in real-time")
+print("=====================================================")
+print("Fish It Player Monitor - ACCURATE FISHING DETECTION")
+print("=====================================================")
+print("✅ Multiple detection methods:")
+print("   1. Rod/Tool detection")
+print("   2. Animation tracking")
+print("   3. Fish count monitoring")
+print("   4. Leaderstats checking")
+print("🎣 Press F9 to see console debug logs")
 print("Compatible with: Delta Executor, Mobile & Desktop")
+print("=====================================================")
