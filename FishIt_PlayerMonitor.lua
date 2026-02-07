@@ -1,28 +1,59 @@
 -- Fish It Player Monitor with Discord Webhook
+-- Enhanced Version with Minimize/Maximize Feature & Responsive Design
 -- Compatible with Delta Executor
--- Created for monitoring players and sending notifications to Discord
 
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
 local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 -- Variables
 local LocalPlayer = Players.LocalPlayer
 local webhookURL = ""
 local monitoringEnabled = false
-local notificationInterval = 300 -- Default 5 minutes (in seconds)
+local notificationInterval = 300
 local lastNotificationTime = 0
+local isMinimized = false
+
+-- Responsive Design Variables
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local baseSize = isMobile and 0.85 or 1
+
+-- Animation Functions
+local function tweenSize(object, targetSize, duration)
+    local tween = TweenService:Create(object, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = targetSize
+    })
+    tween:Play()
+    return tween
+end
+
+local function tweenPosition(object, targetPosition, duration)
+    local tween = TweenService:Create(object, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = targetPosition
+    })
+    tween:Play()
+    return tween
+end
+
+local function tweenTransparency(object, targetTransparency, duration)
+    local tween = TweenService:Create(object, TweenInfo.new(duration or 0.2, Enum.EasingStyle.Quad), {
+        BackgroundTransparency = targetTransparency
+    })
+    tween:Play()
+    return tween
+end
 
 -- GUI Creation
 local function createGUI()
-    -- Main ScreenGui
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "FishItMonitorGUI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.IgnoreGuiInset = true
     
-    -- Check if running on supported executor
     if gethui then
         ScreenGui.Parent = gethui()
     elseif syn and syn.protect_gui then
@@ -32,21 +63,26 @@ local function createGUI()
         ScreenGui.Parent = CoreGui
     end
     
+    -- Calculate responsive sizes
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    local guiWidth = math.min(450 * baseSize, screenSize.X * 0.9)
+    local guiHeight = math.min(520 * baseSize, screenSize.Y * 0.85)
+    
     -- Main Frame
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
     MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
     MainFrame.BorderSizePixel = 0
-    MainFrame.Position = UDim2.new(0.35, 0, 0.25, 0)
-    MainFrame.Size = UDim2.new(0, 450, 0, 520)
+    MainFrame.Position = UDim2.new(0.5, -guiWidth/2, 0.5, -guiHeight/2)
+    MainFrame.Size = UDim2.new(0, guiWidth, 0, guiHeight)
     MainFrame.Parent = ScreenGui
+    MainFrame.ClipsDescendants = true
     
-    -- Add rounded corners
     local UICorner = Instance.new("UICorner")
     UICorner.CornerRadius = UDim.new(0, 12)
     UICorner.Parent = MainFrame
     
-    -- Add shadow effect
+    -- Shadow effect
     local Shadow = Instance.new("ImageLabel")
     Shadow.Name = "Shadow"
     Shadow.BackgroundTransparency = 1
@@ -77,13 +113,31 @@ local function createGUI()
     Title.Name = "Title"
     Title.BackgroundTransparency = 1
     Title.Position = UDim2.new(0, 15, 0, 0)
-    Title.Size = UDim2.new(0.7, 0, 1, 0)
+    Title.Size = UDim2.new(0.6, 0, 1, 0)
     Title.Font = Enum.Font.GothamBold
-    Title.Text = "🐟 Fish It - Player Monitor"
+    Title.Text = "🐟 Fish It Monitor"
     Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Title.TextSize = 18
+    Title.TextSize = isMobile and 16 or 18
     Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.TextScaled = isMobile
     Title.Parent = TitleBar
+    
+    -- Minimize Button
+    local MinimizeButton = Instance.new("TextButton")
+    MinimizeButton.Name = "MinimizeButton"
+    MinimizeButton.BackgroundColor3 = Color3.fromRGB(100, 140, 200)
+    MinimizeButton.BorderSizePixel = 0
+    MinimizeButton.Position = UDim2.new(1, -80, 0, 10)
+    MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+    MinimizeButton.Font = Enum.Font.GothamBold
+    MinimizeButton.Text = "−"
+    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinimizeButton.TextSize = 20
+    MinimizeButton.Parent = TitleBar
+    
+    local MinimizeCorner = Instance.new("UICorner")
+    MinimizeCorner.CornerRadius = UDim.new(0, 6)
+    MinimizeCorner.Parent = MinimizeButton
     
     -- Close Button
     local CloseButton = Instance.new("TextButton")
@@ -102,33 +156,41 @@ local function createGUI()
     CloseCorner.CornerRadius = UDim.new(0, 6)
     CloseCorner.Parent = CloseButton
     
+    -- Content Frame (everything below title bar)
+    local ContentFrame = Instance.new("Frame")
+    ContentFrame.Name = "ContentFrame"
+    ContentFrame.BackgroundTransparency = 1
+    ContentFrame.Position = UDim2.new(0, 0, 0, 50)
+    ContentFrame.Size = UDim2.new(1, 0, 1, -50)
+    ContentFrame.Parent = MainFrame
+    
     -- Webhook URL Section
     local WebhookLabel = Instance.new("TextLabel")
     WebhookLabel.Name = "WebhookLabel"
     WebhookLabel.BackgroundTransparency = 1
-    WebhookLabel.Position = UDim2.new(0, 20, 0, 65)
+    WebhookLabel.Position = UDim2.new(0, 20, 0, 15)
     WebhookLabel.Size = UDim2.new(0, 200, 0, 25)
     WebhookLabel.Font = Enum.Font.GothamSemibold
     WebhookLabel.Text = "Discord Webhook URL:"
     WebhookLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    WebhookLabel.TextSize = 14
+    WebhookLabel.TextSize = isMobile and 12 or 14
     WebhookLabel.TextXAlignment = Enum.TextXAlignment.Left
-    WebhookLabel.Parent = MainFrame
+    WebhookLabel.Parent = ContentFrame
     
     local WebhookInput = Instance.new("TextBox")
     WebhookInput.Name = "WebhookInput"
     WebhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
     WebhookInput.BorderSizePixel = 0
-    WebhookInput.Position = UDim2.new(0, 20, 0, 95)
-    WebhookInput.Size = UDim2.new(0, 410, 0, 35)
+    WebhookInput.Position = UDim2.new(0, 20, 0, 45)
+    WebhookInput.Size = UDim2.new(1, -40, 0, 35)
     WebhookInput.Font = Enum.Font.Gotham
     WebhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
     WebhookInput.Text = ""
     WebhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    WebhookInput.TextSize = 12
+    WebhookInput.TextSize = isMobile and 10 or 12
     WebhookInput.TextXAlignment = Enum.TextXAlignment.Left
     WebhookInput.ClearTextOnFocus = false
-    WebhookInput.Parent = MainFrame
+    WebhookInput.Parent = ContentFrame
     
     local WebhookCorner = Instance.new("UICorner")
     WebhookCorner.CornerRadius = UDim.new(0, 6)
@@ -142,28 +204,28 @@ local function createGUI()
     local IntervalLabel = Instance.new("TextLabel")
     IntervalLabel.Name = "IntervalLabel"
     IntervalLabel.BackgroundTransparency = 1
-    IntervalLabel.Position = UDim2.new(0, 20, 0, 145)
+    IntervalLabel.Position = UDim2.new(0, 20, 0, 95)
     IntervalLabel.Size = UDim2.new(0, 200, 0, 25)
     IntervalLabel.Font = Enum.Font.GothamSemibold
-    IntervalLabel.Text = "Notification Interval (minutes):"
+    IntervalLabel.Text = "Interval (minutes):"
     IntervalLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    IntervalLabel.TextSize = 14
+    IntervalLabel.TextSize = isMobile and 12 or 14
     IntervalLabel.TextXAlignment = Enum.TextXAlignment.Left
-    IntervalLabel.Parent = MainFrame
+    IntervalLabel.Parent = ContentFrame
     
     local IntervalInput = Instance.new("TextBox")
     IntervalInput.Name = "IntervalInput"
     IntervalInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
     IntervalInput.BorderSizePixel = 0
-    IntervalInput.Position = UDim2.new(0, 20, 0, 175)
-    IntervalInput.Size = UDim2.new(0, 410, 0, 35)
+    IntervalInput.Position = UDim2.new(0, 20, 0, 125)
+    IntervalInput.Size = UDim2.new(1, -40, 0, 35)
     IntervalInput.Font = Enum.Font.Gotham
     IntervalInput.PlaceholderText = "Enter minutes (e.g., 5)"
     IntervalInput.Text = "5"
     IntervalInput.TextColor3 = Color3.fromRGB(255, 255, 255)
     IntervalInput.TextSize = 14
     IntervalInput.TextXAlignment = Enum.TextXAlignment.Center
-    IntervalInput.Parent = MainFrame
+    IntervalInput.Parent = ContentFrame
     
     local IntervalCorner = Instance.new("UICorner")
     IntervalCorner.CornerRadius = UDim.new(0, 6)
@@ -174,9 +236,9 @@ local function createGUI()
     PlayerCountFrame.Name = "PlayerCountFrame"
     PlayerCountFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
     PlayerCountFrame.BorderSizePixel = 0
-    PlayerCountFrame.Position = UDim2.new(0, 20, 0, 225)
-    PlayerCountFrame.Size = UDim2.new(0, 410, 0, 60)
-    PlayerCountFrame.Parent = MainFrame
+    PlayerCountFrame.Position = UDim2.new(0, 20, 0, 175)
+    PlayerCountFrame.Size = UDim2.new(1, -40, 0, 60)
+    PlayerCountFrame.Parent = ContentFrame
     
     local PlayerCountCorner = Instance.new("UICorner")
     PlayerCountCorner.CornerRadius = UDim.new(0, 8)
@@ -189,7 +251,7 @@ local function createGUI()
     PlayerCountLabel.Font = Enum.Font.GothamSemibold
     PlayerCountLabel.Text = "Current Players:"
     PlayerCountLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    PlayerCountLabel.TextSize = 14
+    PlayerCountLabel.TextSize = isMobile and 12 or 14
     PlayerCountLabel.Parent = PlayerCountFrame
     
     local PlayerCountValue = Instance.new("TextLabel")
@@ -200,32 +262,32 @@ local function createGUI()
     PlayerCountValue.Font = Enum.Font.GothamBold
     PlayerCountValue.Text = "0"
     PlayerCountValue.TextColor3 = Color3.fromRGB(100, 200, 255)
-    PlayerCountValue.TextSize = 24
+    PlayerCountValue.TextSize = isMobile and 20 or 24
     PlayerCountValue.Parent = PlayerCountFrame
     
     -- Player List
     local PlayerListLabel = Instance.new("TextLabel")
     PlayerListLabel.Name = "PlayerListLabel"
     PlayerListLabel.BackgroundTransparency = 1
-    PlayerListLabel.Position = UDim2.new(0, 20, 0, 295)
+    PlayerListLabel.Position = UDim2.new(0, 20, 0, 245)
     PlayerListLabel.Size = UDim2.new(0, 200, 0, 25)
     PlayerListLabel.Font = Enum.Font.GothamSemibold
     PlayerListLabel.Text = "Player List:"
     PlayerListLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    PlayerListLabel.TextSize = 14
+    PlayerListLabel.TextSize = isMobile and 12 or 14
     PlayerListLabel.TextXAlignment = Enum.TextXAlignment.Left
-    PlayerListLabel.Parent = MainFrame
+    PlayerListLabel.Parent = ContentFrame
     
     local PlayerListFrame = Instance.new("ScrollingFrame")
     PlayerListFrame.Name = "PlayerListFrame"
     PlayerListFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
     PlayerListFrame.BorderSizePixel = 0
-    PlayerListFrame.Position = UDim2.new(0, 20, 0, 325)
-    PlayerListFrame.Size = UDim2.new(0, 410, 0, 120)
+    PlayerListFrame.Position = UDim2.new(0, 20, 0, 275)
+    PlayerListFrame.Size = UDim2.new(1, -40, 0, 120)
     PlayerListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
     PlayerListFrame.ScrollBarThickness = 6
     PlayerListFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
-    PlayerListFrame.Parent = MainFrame
+    PlayerListFrame.Parent = ContentFrame
     
     local PlayerListCorner = Instance.new("UICorner")
     PlayerListCorner.CornerRadius = UDim.new(0, 6)
@@ -243,39 +305,79 @@ local function createGUI()
     PlayerListPadding.PaddingRight = UDim.new(0, 10)
     PlayerListPadding.Parent = PlayerListFrame
     
-    -- Start/Stop Button
+    -- Buttons
+    local buttonWidth = isMobile and (guiWidth - 50) / 2 or 195
+    local buttonHeight = isMobile and 40 or 45
+    
     local ToggleButton = Instance.new("TextButton")
     ToggleButton.Name = "ToggleButton"
     ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 80)
     ToggleButton.BorderSizePixel = 0
-    ToggleButton.Position = UDim2.new(0, 20, 0, 460)
-    ToggleButton.Size = UDim2.new(0, 195, 0, 45)
+    ToggleButton.Position = UDim2.new(0, 20, 0, 410)
+    ToggleButton.Size = UDim2.new(0, buttonWidth, 0, buttonHeight)
     ToggleButton.Font = Enum.Font.GothamBold
-    ToggleButton.Text = "▶ START MONITORING"
+    ToggleButton.Text = "▶ START"
     ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    ToggleButton.TextSize = 14
-    ToggleButton.Parent = MainFrame
+    ToggleButton.TextSize = isMobile and 12 or 14
+    ToggleButton.Parent = ContentFrame
     
     local ToggleCorner = Instance.new("UICorner")
     ToggleCorner.CornerRadius = UDim.new(0, 8)
     ToggleCorner.Parent = ToggleButton
     
-    -- Test Webhook Button
     local TestButton = Instance.new("TextButton")
     TestButton.Name = "TestButton"
     TestButton.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
     TestButton.BorderSizePixel = 0
-    TestButton.Position = UDim2.new(0, 235, 0, 460)
-    TestButton.Size = UDim2.new(0, 195, 0, 45)
+    TestButton.Position = UDim2.new(1, -buttonWidth - 20, 0, 410)
+    TestButton.Size = UDim2.new(0, buttonWidth, 0, buttonHeight)
     TestButton.Font = Enum.Font.GothamBold
-    TestButton.Text = "🔔 TEST WEBHOOK"
+    TestButton.Text = "🔔 TEST"
     TestButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TestButton.TextSize = 14
-    TestButton.Parent = MainFrame
+    TestButton.TextSize = isMobile and 12 or 14
+    TestButton.Parent = ContentFrame
     
     local TestCorner = Instance.new("UICorner")
     TestCorner.CornerRadius = UDim.new(0, 8)
     TestCorner.Parent = TestButton
+    
+    -- Minimized Icon (Hidden by default)
+    local MinimizedIcon = Instance.new("ImageButton")
+    MinimizedIcon.Name = "MinimizedIcon"
+    MinimizedIcon.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    MinimizedIcon.BorderSizePixel = 0
+    MinimizedIcon.Position = UDim2.new(1, -80, 1, -80)
+    MinimizedIcon.Size = UDim2.new(0, 60, 0, 60)
+    MinimizedIcon.Visible = false
+    MinimizedIcon.Parent = ScreenGui
+    MinimizedIcon.ZIndex = 10
+    
+    local IconCorner = Instance.new("UICorner")
+    IconCorner.CornerRadius = UDim.new(0, 30)
+    IconCorner.Parent = MinimizedIcon
+    
+    local IconText = Instance.new("TextLabel")
+    IconText.Name = "IconText"
+    IconText.BackgroundTransparency = 1
+    IconText.Size = UDim2.new(1, 0, 1, 0)
+    IconText.Font = Enum.Font.GothamBold
+    IconText.Text = "🐟"
+    IconText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    IconText.TextSize = 32
+    IconText.Parent = MinimizedIcon
+    
+    local IconShadow = Instance.new("ImageLabel")
+    IconShadow.Name = "IconShadow"
+    IconShadow.BackgroundTransparency = 1
+    IconShadow.Position = UDim2.new(0, -10, 0, -10)
+    IconShadow.Size = UDim2.new(1, 20, 1, 20)
+    IconShadow.ZIndex = 9
+    IconShadow.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    IconShadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    IconShadow.ImageTransparency = 0.5
+    IconShadow.ScaleType = Enum.ScaleType.Slice
+    IconShadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    IconShadow.Parent = MinimizedIcon
     
     -- Make Frame Draggable
     local dragging
@@ -308,7 +410,7 @@ local function createGUI()
         end
     end)
     
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
+    UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             update(input)
         end
@@ -317,13 +419,17 @@ local function createGUI()
     return {
         ScreenGui = ScreenGui,
         MainFrame = MainFrame,
+        ContentFrame = ContentFrame,
         WebhookInput = WebhookInput,
         IntervalInput = IntervalInput,
         PlayerCountValue = PlayerCountValue,
         PlayerListFrame = PlayerListFrame,
         ToggleButton = ToggleButton,
         TestButton = TestButton,
-        CloseButton = CloseButton
+        CloseButton = CloseButton,
+        MinimizeButton = MinimizeButton,
+        MinimizedIcon = MinimizedIcon,
+        Shadow = Shadow
     }
 end
 
@@ -342,7 +448,6 @@ end
 
 -- Function to update player list display
 local function updatePlayerListDisplay(gui)
-    -- Clear existing entries
     for _, child in ipairs(gui.PlayerListFrame:GetChildren()) do
         if child:IsA("TextLabel") then
             child:Destroy()
@@ -351,10 +456,8 @@ local function updatePlayerListDisplay(gui)
     
     local playerList, playerCount = getPlayerList()
     
-    -- Update count
     gui.PlayerCountValue.Text = tostring(playerCount)
     
-    -- Add player entries
     for i, playerName in ipairs(playerList) do
         local PlayerEntry = Instance.new("TextLabel")
         PlayerEntry.Name = "Player_" .. i
@@ -364,7 +467,7 @@ local function updatePlayerListDisplay(gui)
         PlayerEntry.Font = Enum.Font.Gotham
         PlayerEntry.Text = "👤 " .. playerName
         PlayerEntry.TextColor3 = Color3.fromRGB(255, 255, 255)
-        PlayerEntry.TextSize = 12
+        PlayerEntry.TextSize = isMobile and 10 or 12
         PlayerEntry.TextXAlignment = Enum.TextXAlignment.Left
         PlayerEntry.Parent = gui.PlayerListFrame
         
@@ -377,7 +480,6 @@ local function updatePlayerListDisplay(gui)
         EntryPadding.Parent = PlayerEntry
     end
     
-    -- Update canvas size
     gui.PlayerListFrame.CanvasSize = UDim2.new(0, 0, 0, (#playerList * 30) + 10)
 end
 
@@ -450,11 +552,62 @@ local function showNotification(title, text, duration)
     })
 end
 
+-- Minimize/Maximize Functions
+local function minimizeGUI(gui)
+    isMinimized = true
+    
+    -- Animate main frame out
+    tweenSize(gui.MainFrame, UDim2.new(0, 0, 0, 0), 0.3)
+    tweenTransparency(gui.Shadow, 1, 0.2)
+    
+    wait(0.3)
+    gui.MainFrame.Visible = false
+    
+    -- Show minimized icon with animation
+    gui.MinimizedIcon.Visible = true
+    gui.MinimizedIcon.Size = UDim2.new(0, 0, 0, 0)
+    tweenSize(gui.MinimizedIcon, UDim2.new(0, 60, 0, 60), 0.3)
+    
+    showNotification("📦 Minimized", "Click the icon to restore", 3)
+end
+
+local function maximizeGUI(gui)
+    isMinimized = false
+    
+    -- Hide minimized icon with animation
+    tweenSize(gui.MinimizedIcon, UDim2.new(0, 0, 0, 0), 0.3)
+    
+    wait(0.3)
+    gui.MinimizedIcon.Visible = false
+    
+    -- Show main frame with animation
+    gui.MainFrame.Visible = true
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    local guiWidth = math.min(450 * baseSize, screenSize.X * 0.9)
+    local guiHeight = math.min(520 * baseSize, screenSize.Y * 0.85)
+    
+    gui.MainFrame.Size = UDim2.new(0, 0, 0, 0)
+    tweenSize(gui.MainFrame, UDim2.new(0, guiWidth, 0, guiHeight), 0.3)
+    tweenTransparency(gui.Shadow, 0.7, 0.2)
+end
+
 -- Main execution
 local gui = createGUI()
 
+-- Minimize button functionality
+gui.MinimizeButton.MouseButton1Click:Connect(function()
+    minimizeGUI(gui)
+end)
+
+-- Minimized icon click to restore
+gui.MinimizedIcon.MouseButton1Click:Connect(function()
+    maximizeGUI(gui)
+end)
+
 -- Close button functionality
 gui.CloseButton.MouseButton1Click:Connect(function()
+    tweenSize(gui.MainFrame, UDim2.new(0, 0, 0, 0), 0.3)
+    wait(0.3)
     gui.ScreenGui:Destroy()
     monitoringEnabled = false
 end)
@@ -485,7 +638,7 @@ gui.TestButton.MouseButton1Click:Connect(function()
         gui.TestButton.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
     end
     
-    gui.TestButton.Text = "🔔 TEST WEBHOOK"
+    gui.TestButton.Text = "🔔 TEST"
 end)
 
 -- Toggle monitoring button
@@ -510,7 +663,7 @@ gui.ToggleButton.MouseButton1Click:Connect(function()
         monitoringEnabled = true
         lastNotificationTime = 0
         
-        gui.ToggleButton.Text = "⏸ STOP MONITORING"
+        gui.ToggleButton.Text = "⏸ STOP"
         gui.ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         gui.WebhookInput.TextEditable = false
         gui.IntervalInput.TextEditable = false
@@ -519,7 +672,7 @@ gui.ToggleButton.MouseButton1Click:Connect(function()
     else
         monitoringEnabled = false
         
-        gui.ToggleButton.Text = "▶ START MONITORING"
+        gui.ToggleButton.Text = "▶ START"
         gui.ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 80)
         gui.WebhookInput.TextEditable = true
         gui.IntervalInput.TextEditable = true
@@ -576,12 +729,24 @@ Players.PlayerRemoving:Connect(function(player)
     updatePlayerListDisplay(gui)
 end)
 
+-- Handle screen resize for responsive design
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    if not isMinimized then
+        local screenSize = workspace.CurrentCamera.ViewportSize
+        local guiWidth = math.min(450 * baseSize, screenSize.X * 0.9)
+        local guiHeight = math.min(520 * baseSize, screenSize.Y * 0.85)
+        
+        tweenSize(gui.MainFrame, UDim2.new(0, guiWidth, 0, guiHeight), 0.2)
+    end
+end)
+
 -- Initial update
 updatePlayerListDisplay(gui)
 
--- Success notification
-showNotification("✅ Fish It Monitor", "Script loaded successfully!", 5)
+-- Success notification with animation
+wait(0.1)
+showNotification("✅ Fish It Monitor", "Script loaded! Click minimize to hide GUI", 5)
 
-print("Fish It Player Monitor loaded successfully!")
-print("Created by: Roblox Script Developer")
-print("Executor: Delta Compatible")
+print("Fish It Player Monitor Enhanced Version loaded!")
+print("Features: Minimize/Maximize, Responsive Design, Smooth Animations")
+print("Compatible with: Delta Executor, Mobile & Desktop")
