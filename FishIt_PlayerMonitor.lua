@@ -1,6 +1,5 @@
 -- Fish It Player Monitor with Discord Webhook
--- Enhanced Version with ACCURATE Fishing Detection
--- FIXED: Proper fishing detection for Fish It game
+-- Simple Version - Player List Only
 -- Compatible with Delta Executor
 
 local Players = game:GetService("Players")
@@ -9,7 +8,6 @@ local StarterGui = game:GetService("StarterGui")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Variables
 local LocalPlayer = Players.LocalPlayer
@@ -19,231 +17,9 @@ local notificationInterval = 300
 local lastNotificationTime = 0
 local isMinimized = false
 
--- Fishing Detection Variables
-local playerFishCounts = {} -- Track fish count per player
-local playerFishingStatus = {} -- Track if player is actively fishing
-local FISHING_CHECK_INTERVAL = 3 -- Check every 3 seconds
-
 -- Responsive Design Variables
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local baseSize = isMobile and 0.85 or 1
-
--- Function to get player's fish count from inventory - IMPROVED VERSION
-local function getPlayerFishCount(player)
-    local totalFish = 0
-    
-    local success, result = pcall(function()
-        -- Method 1: Check for FishIt leaderstats (most common)
-        local leaderstats = player:FindFirstChild("leaderstats")
-        if leaderstats then
-            -- Try different possible fish stat names
-            local fishStat = leaderstats:FindFirstChild("Fish") 
-                or leaderstats:FindFirstChild("TotalFish") 
-                or leaderstats:FindFirstChild("FishCaught")
-                or leaderstats:FindFirstChild("🐟")
-            
-            if fishStat and (fishStat:IsA("IntValue") or fishStat:IsA("NumberValue")) then
-                print("[DEBUG] " .. player.Name .. " fish from leaderstats: " .. fishStat.Value)
-                return fishStat.Value
-            end
-        end
-        
-        -- Method 2: Check PlayerData folder
-        local playerData = player:FindFirstChild("Data") or player:FindFirstChild("PlayerData")
-        if playerData then
-            local fishValue = playerData:FindFirstChild("Fish") 
-                or playerData:FindFirstChild("TotalFish")
-                or playerData:FindFirstChild("FishCaught")
-            
-            if fishValue and (fishValue:IsA("IntValue") or fishValue:IsA("NumberValue")) then
-                print("[DEBUG] " .. player.Name .. " fish from PlayerData: " .. fishValue.Value)
-                return fishValue.Value
-            end
-        end
-        
-        -- Method 3: Check PlayerGui for UI elements
-        local playerGui = player:FindFirstChild("PlayerGui")
-        if playerGui then
-            -- Search through all GUIs for fish count displays
-            for _, gui in pairs(playerGui:GetChildren()) do
-                for _, descendant in pairs(gui:GetDescendants()) do
-                    if descendant:IsA("TextLabel") or descendant:IsA("TextBox") then
-                        local text = descendant.Text
-                        -- Look for patterns like "Fish: 15", "15 Fish", "🐟 15"
-                        local fishNum = tonumber(text:match("(%d+)%s*[Ff]ish")) 
-                            or tonumber(text:match("[Ff]ish%s*:?%s*(%d+)"))
-                            or tonumber(text:match("🐟%s*:?%s*(%d+)"))
-                            or tonumber(text:match("(%d+)%s*🐟"))
-                        
-                        if fishNum and fishNum > 0 then
-                            print("[DEBUG] " .. player.Name .. " fish from GUI: " .. fishNum)
-                            return fishNum
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Method 4: Check Character for fishing rod or animation
-        local character = player.Character
-        if character then
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                -- Check if player is holding a fishing rod
-                for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
-                    if track.Animation and track.Animation.AnimationId then
-                        local animId = track.Animation.AnimationId:lower()
-                        if animId:find("fish") or animId:find("cast") or animId:find("reel") then
-                            print("[DEBUG] " .. player.Name .. " has fishing animation active!")
-                            -- Return special flag to indicate active fishing
-                            return -1 -- Special value for active animation
-                        end
-                    end
-                end
-            end
-        end
-        
-        return 0
-    end)
-    
-    if success then
-        return result or totalFish
-    else
-        return totalFish
-    end
-end
-
--- Function to check if player is actively fishing (holding rod, in water, etc)
-local function isPlayerActivelyFishing(player)
-    local success, result = pcall(function()
-        local character = player.Character
-        if not character then return false end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        local rootPart = character:FindFirstChild("HumanoidRootPart")
-        
-        if not humanoid or not rootPart then return false end
-        
-        -- Check 1: Is player holding a fishing rod tool?
-        local tool = character:FindFirstChildOfClass("Tool")
-        if tool then
-            local toolName = tool.Name:lower()
-            if toolName:find("rod") or toolName:find("fish") or toolName:find("pole") then
-                print("[DEBUG] " .. player.Name .. " is holding fishing rod: " .. tool.Name)
-                return true
-            end
-        end
-        
-        -- Check 2: Check backpack for equipped rod
-        local backpack = player:FindFirstChild("Backpack")
-        if backpack then
-            for _, item in pairs(backpack:GetChildren()) do
-                if item:IsA("Tool") then
-                    local itemName = item.Name:lower()
-                    if itemName:find("rod") or itemName:find("fish") or itemName:find("pole") then
-                        -- Rod in backpack but check if recently used
-                        local lastUsed = item:GetAttribute("LastUsed")
-                        if lastUsed and (tick() - lastUsed) < 10 then
-                            return true
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Check 3: Animation check
-        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
-            if track.Animation and track.Animation.AnimationId then
-                local animId = track.Animation.AnimationId:lower()
-                if animId:find("fish") or animId:find("cast") or animId:find("reel") or animId:find("rod") then
-                    print("[DEBUG] " .. player.Name .. " has fishing animation playing")
-                    return true
-                end
-            end
-        end
-        
-        -- Check 4: Look for fishing-related parts attached to character
-        for _, child in pairs(character:GetDescendants()) do
-            if child:IsA("BasePart") then
-                local partName = child.Name:lower()
-                if partName:find("rod") or partName:find("line") or partName:find("bobber") or partName:find("float") then
-                    print("[DEBUG] " .. player.Name .. " has fishing part attached: " .. child.Name)
-                    return true
-                end
-            end
-        end
-        
-        return false
-    end)
-    
-    return success and result or false
-end
-
--- Function to update fishing status for a player
-local function updateFishingStatus(player)
-    local currentFishCount = getPlayerFishCount(player)
-    local previousFishCount = playerFishCounts[player.UserId] or 0
-    local isActivelyFishing = isPlayerActivelyFishing(player)
-    
-    -- Special case: -1 means active animation detected
-    if currentFishCount == -1 then
-        isActivelyFishing = true
-        currentFishCount = previousFishCount -- Keep previous count
-    end
-    
-    -- Primary detection: Check if actively using fishing rod
-    if isActivelyFishing then
-        print("[FISHING] " .. player.Name .. " is ACTIVELY FISHING (rod/animation detected)")
-        playerFishingStatus[player.UserId] = {
-            isFishing = true,
-            lastUpdate = tick(),
-            fishCount = currentFishCount,
-            fishGained = 0
-        }
-    -- Secondary detection: Fish count increased
-    elseif currentFishCount > previousFishCount then
-        print("[FISHING] " .. player.Name .. " caught fish! " .. previousFishCount .. " -> " .. currentFishCount)
-        playerFishingStatus[player.UserId] = {
-            isFishing = true,
-            lastUpdate = tick(),
-            fishCount = currentFishCount,
-            fishGained = currentFishCount - previousFishCount
-        }
-    else
-        -- Check if last activity was recent (within 15 seconds)
-        local status = playerFishingStatus[player.UserId]
-        if status and (tick() - status.lastUpdate) < 15 then
-            -- Still consider them fishing if recently active
-            status.isFishing = true
-            status.fishCount = currentFishCount
-        elseif status then
-            -- Mark as NOT fishing (IDLE)
-            if status.isFishing then
-                print("[IDLE] " .. player.Name .. " is now IDLE (stopped fishing)")
-            end
-            status.isFishing = false
-            status.fishCount = currentFishCount
-        else
-            playerFishingStatus[player.UserId] = {
-                isFishing = false,
-                lastUpdate = tick(),
-                fishCount = currentFishCount,
-                fishGained = 0
-            }
-        end
-    end
-    
-    playerFishCounts[player.UserId] = currentFishCount
-end
-
--- Function to check if player is fishing
-local function isPlayerFishing(player)
-    local status = playerFishingStatus[player.UserId]
-    if status then
-        return status.isFishing, status.fishCount or 0
-    end
-    return false, 0
-end
 
 -- Animation Functions
 local function tweenSize(object, targetSize, duration)
@@ -631,7 +407,7 @@ local function createGUI()
     }
 end
 
--- Update player list display with fishing status
+-- Update player list display (simple version - just show players)
 local function updatePlayerListDisplay(gui)
     -- Clear existing player entries
     for _, child in pairs(gui.PlayerListFrame:GetChildren()) do
@@ -642,25 +418,15 @@ local function updatePlayerListDisplay(gui)
     
     local players = Players:GetPlayers()
     local playerCount = #players
-    local fishingCount = 0
     
     -- Update player count
     gui.PlayerCountDisplay.Text = playerCount .. "/" .. Players.MaxPlayers
     
     -- Add player entries
     for i, player in ipairs(players) do
-        -- Update fishing status before displaying
-        updateFishingStatus(player)
-        local isFishing, fishCount = isPlayerFishing(player)
-        
-        if isFishing then
-            fishingCount = fishingCount + 1
-        end
-        
         local PlayerEntry = Instance.new("Frame")
         PlayerEntry.Name = "Player_" .. player.Name
-        -- HIJAU untuk yang MANCING, ABU-ABU untuk yang IDLE
-        PlayerEntry.BackgroundColor3 = isFishing and Color3.fromRGB(35, 65, 35) or Color3.fromRGB(45, 45, 60)
+        PlayerEntry.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
         PlayerEntry.BorderSizePixel = 0
         PlayerEntry.Size = UDim2.new(1, 0, 0, 35)
         PlayerEntry.Parent = gui.PlayerListFrame
@@ -669,22 +435,22 @@ local function updatePlayerListDisplay(gui)
         EntryCorner.CornerRadius = UDim.new(0, 4)
         EntryCorner.Parent = PlayerEntry
         
-        -- 🎣 untuk yang MANCING, 💤 untuk yang IDLE
-        local FishingIndicator = Instance.new("TextLabel")
-        FishingIndicator.BackgroundTransparency = 1
-        FishingIndicator.Position = UDim2.new(0, 5, 0, 0)
-        FishingIndicator.Size = UDim2.new(0, 20, 1, 0)
-        FishingIndicator.Font = Enum.Font.GothamBold
-        FishingIndicator.Text = isFishing and "🎣" or "💤"
-        FishingIndicator.TextColor3 = isFishing and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(150, 150, 150)
-        FishingIndicator.TextSize = 16
-        FishingIndicator.Parent = PlayerEntry
+        -- Player icon
+        local PlayerIcon = Instance.new("TextLabel")
+        PlayerIcon.BackgroundTransparency = 1
+        PlayerIcon.Position = UDim2.new(0, 5, 0, 0)
+        PlayerIcon.Size = UDim2.new(0, 25, 1, 0)
+        PlayerIcon.Font = Enum.Font.GothamBold
+        PlayerIcon.Text = "👤"
+        PlayerIcon.TextColor3 = Color3.fromRGB(100, 200, 255)
+        PlayerIcon.TextSize = 16
+        PlayerIcon.Parent = PlayerEntry
         
         -- Player name
         local PlayerName = Instance.new("TextLabel")
         PlayerName.BackgroundTransparency = 1
-        PlayerName.Position = UDim2.new(0, 30, 0, 0)
-        PlayerName.Size = UDim2.new(0.5, -30, 1, 0)
+        PlayerName.Position = UDim2.new(0, 35, 0, 0)
+        PlayerName.Size = UDim2.new(0.6, -35, 1, 0)
         PlayerName.Font = Enum.Font.Gotham
         PlayerName.Text = player.Name
         PlayerName.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -693,59 +459,40 @@ local function updatePlayerListDisplay(gui)
         PlayerName.TextTruncate = Enum.TextTruncate.AtEnd
         PlayerName.Parent = PlayerEntry
         
-        -- Fish count
-        local FishCount = Instance.new("TextLabel")
-        FishCount.BackgroundTransparency = 1
-        FishCount.Position = UDim2.new(0.5, 0, 0, 0)
-        FishCount.Size = UDim2.new(0.5, -5, 1, 0)
-        FishCount.Font = Enum.Font.GothamSemibold
-        FishCount.Text = "🐟 " .. fishCount
-        FishCount.TextColor3 = isFishing and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(150, 200, 255)
-        FishCount.TextSize = isMobile and 10 or 11
-        FishCount.TextXAlignment = Enum.TextXAlignment.Right
-        FishCount.Parent = PlayerEntry
+        -- Display name
+        local DisplayName = Instance.new("TextLabel")
+        DisplayName.BackgroundTransparency = 1
+        DisplayName.Position = UDim2.new(0.6, 0, 0, 0)
+        DisplayName.Size = UDim2.new(0.4, -5, 1, 0)
+        DisplayName.Font = Enum.Font.GothamSemibold
+        DisplayName.Text = "@" .. player.DisplayName
+        DisplayName.TextColor3 = Color3.fromRGB(150, 200, 255)
+        DisplayName.TextSize = isMobile and 10 or 11
+        DisplayName.TextXAlignment = Enum.TextXAlignment.Right
+        DisplayName.TextTruncate = Enum.TextTruncate.AtEnd
+        DisplayName.Parent = PlayerEntry
     end
     
     -- Update canvas size for scrolling
     gui.PlayerListFrame.CanvasSize = UDim2.new(0, 0, 0, gui.PlayerListLayout.AbsoluteContentSize.Y + 16)
-    
-    -- Update status to show fishing count
-    if monitoringEnabled then
-        gui.StatusLabel.Text = "✅ Active - " .. fishingCount .. "/" .. playerCount .. " fishing"
-    end
 end
 
 -- Function to send webhook
 local function sendWebhook(url, isTest)
     local players = Players:GetPlayers()
     local playerList = {}
-    local fishingPlayers = {}
-    local idlePlayers = {}
     
     for _, player in ipairs(players) do
-        updateFishingStatus(player)
-        local isFishing, fishCount = isPlayerFishing(player)
-        
-        local playerData = {
+        table.insert(playerList, {
             name = player.Name,
             displayName = player.DisplayName,
-            userId = player.UserId,
-            isFishing = isFishing,
-            fishCount = fishCount
-        }
-        
-        table.insert(playerList, playerData)
-        
-        if isFishing then
-            table.insert(fishingPlayers, playerData)
-        else
-            table.insert(idlePlayers, playerData)
-        end
+            userId = player.UserId
+        })
     end
     
     local embed = {
         ["title"] = isTest and "🧪 Test Webhook" or "📊 Player Update",
-        ["description"] = isTest and "This is a test notification from Fish It Monitor!" or "Current players and fishing status:",
+        ["description"] = isTest and "This is a test notification from Fish It Monitor!" or "Current players in the server:",
         ["color"] = isTest and 3447003 or 5814783,
         ["fields"] = {
             {
@@ -754,41 +501,23 @@ local function sendWebhook(url, isTest)
                 ["inline"] = true
             },
             {
-                ["name"] = "🎣 Fishing",
-                ["value"] = #fishingPlayers .. " active",
-                ["inline"] = true
-            },
-            {
-                ["name"] = "💤 Idle",
-                ["value"] = #idlePlayers .. " idle",
+                ["name"] = "🎮 Server ID",
+                ["value"] = game.JobId ~= "" and game.JobId:sub(1, 8) .. "..." or "Private",
                 ["inline"] = true
             }
         },
         ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%S")
     }
     
-    -- Add fishing players list
-    if #fishingPlayers > 0 then
-        local fishingList = {}
-        for i, player in ipairs(fishingPlayers) do
-            table.insert(fishingList, "🎣 " .. player.name .. " - " .. player.fishCount .. " fish")
+    -- Add player list if not empty
+    if #playerList > 0 then
+        local playerNames = {}
+        for i, player in ipairs(playerList) do
+            table.insert(playerNames, i .. ". " .. player.name .. " (@" .. player.displayName .. ")")
         end
         table.insert(embed.fields, {
-            ["name"] = "🟢 Active Fishers",
-            ["value"] = table.concat(fishingList, "\n"),
-            ["inline"] = false
-        })
-    end
-    
-    -- Add idle players list
-    if #idlePlayers > 0 then
-        local idleList = {}
-        for i, player in ipairs(idlePlayers) do
-            table.insert(idleList, "💤 " .. player.name .. " - " .. player.fishCount .. " fish")
-        end
-        table.insert(embed.fields, {
-            ["name"] = "⚪ Idle Players",
-            ["value"] = table.concat(idleList, "\n"),
+            ["name"] = "📋 Player List",
+            ["value"] = table.concat(playerNames, "\n"),
             ["inline"] = false
         })
     end
@@ -933,6 +662,7 @@ gui.ToggleButton.MouseButton1Click:Connect(function()
         gui.ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         gui.WebhookInput.TextEditable = false
         gui.IntervalInput.TextEditable = false
+        gui.StatusLabel.Text = "✅ Status: Active - Monitoring players"
         gui.StatusLabel.TextColor3 = Color3.fromRGB(50, 200, 100)
         
         showNotification("✅ Started", "Monitoring enabled! Interval: " .. intervalMinutes .. " min", 5)
@@ -955,19 +685,6 @@ spawn(function()
     while wait(2) do
         if gui.ScreenGui.Parent then
             updatePlayerListDisplay(gui)
-        else
-            break
-        end
-    end
-end)
-
--- Monitor fishing status every 3 seconds
-spawn(function()
-    while wait(FISHING_CHECK_INTERVAL) do
-        if gui.ScreenGui.Parent then
-            for _, player in ipairs(Players:GetPlayers()) do
-                updateFishingStatus(player)
-            end
         else
             break
         end
@@ -1001,21 +718,12 @@ end)
 -- Player join/leave notifications
 Players.PlayerAdded:Connect(function(player)
     wait(0.5)
-    playerFishCounts[player.UserId] = 0
-    playerFishingStatus[player.UserId] = {
-        isFishing = false,
-        lastUpdate = tick(),
-        fishCount = 0,
-        fishGained = 0
-    }
     updatePlayerListDisplay(gui)
     showNotification("👋 Player Joined", player.Name .. " joined the server!", 3)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
     showNotification("👋 Player Left", player.Name .. " left the server!", 3)
-    playerFishCounts[player.UserId] = nil
-    playerFishingStatus[player.UserId] = nil
     wait(0.5)
     updatePlayerListDisplay(gui)
 end)
@@ -1031,32 +739,19 @@ workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(functio
     end
 end)
 
--- Initialize fishing status for all current players
-for _, player in ipairs(Players:GetPlayers()) do
-    playerFishCounts[player.UserId] = 0
-    playerFishingStatus[player.UserId] = {
-        isFishing = false,
-        lastUpdate = tick(),
-        fishCount = 0,
-        fishGained = 0
-    }
-end
-
 -- Initial update
 updatePlayerListDisplay(gui)
 
 -- Success notification
 wait(0.1)
-showNotification("✅ Fish It Monitor", "Advanced fishing detection enabled! 🎣", 5)
+showNotification("✅ Fish It Monitor", "Simple player monitoring enabled!", 5)
 
 print("=====================================================")
-print("Fish It Player Monitor - ACCURATE FISHING DETECTION")
+print("Fish It Player Monitor - SIMPLE VERSION")
 print("=====================================================")
-print("✅ Multiple detection methods:")
-print("   1. Rod/Tool detection")
-print("   2. Animation tracking")
-print("   3. Fish count monitoring")
-print("   4. Leaderstats checking")
-print("🎣 Press F9 to see console debug logs")
+print("✅ Player list monitoring")
+print("✅ Discord webhook notifications")
+print("✅ Auto-update every 2 seconds")
+print("📊 Shows: Player names & display names")
 print("Compatible with: Delta Executor, Mobile & Desktop")
 print("=====================================================")
