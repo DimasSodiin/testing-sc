@@ -101,6 +101,7 @@ local function updateFishingStatus(player)
     
     -- Player is considered fishing if their fish count increased
     if currentFishCount > previousFishCount then
+        print("[FISHING DETECTED] " .. player.Name .. " is fishing! Fish: " .. previousFishCount .. " -> " .. currentFishCount)
         playerFishingStatus[player.UserId] = {
             isFishing = true,
             lastUpdate = tick(),
@@ -113,9 +114,14 @@ local function updateFishingStatus(player)
         if status and (tick() - status.lastUpdate) < 30 then
             -- Still consider them fishing if recently active
             status.isFishing = true
+            status.fishCount = currentFishCount
         elseif status then
-            -- Mark as inactive
+            -- Mark as inactive (NOT fishing)
+            if status.isFishing then
+                print("[IDLE DETECTED] " .. player.Name .. " stopped fishing. Fish count: " .. currentFishCount)
+            end
             status.isFishing = false
+            status.fishCount = currentFishCount
         else
             playerFishingStatus[player.UserId] = {
                 isFishing = false,
@@ -552,7 +558,8 @@ local function updatePlayerListDisplay(gui)
         
         local PlayerEntry = Instance.new("Frame")
         PlayerEntry.Name = "Player_" .. player.Name
-        PlayerEntry.BackgroundColor3 = isFishing and Color3.fromRGB(45, 60, 45) or Color3.fromRGB(45, 45, 60)
+        -- Hijau jika sedang mancing, abu-abu jika idle
+        PlayerEntry.BackgroundColor3 = isFishing and Color3.fromRGB(35, 65, 35) or Color3.fromRGB(45, 45, 60)
         PlayerEntry.BorderSizePixel = 0
         PlayerEntry.Size = UDim2.new(1, 0, 0, 35)
         PlayerEntry.Parent = gui.PlayerListFrame
@@ -561,7 +568,7 @@ local function updatePlayerListDisplay(gui)
         EntryCorner.CornerRadius = UDim.new(0, 4)
         EntryCorner.Parent = PlayerEntry
         
-        -- Fishing indicator
+        -- Fishing indicator - 🎣 untuk yang mancing, 💤 untuk yang idle
         local FishingIndicator = Instance.new("TextLabel")
         FishingIndicator.BackgroundTransparency = 1
         FishingIndicator.Position = UDim2.new(0, 5, 0, 0)
