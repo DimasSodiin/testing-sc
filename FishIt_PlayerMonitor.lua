@@ -506,4 +506,240 @@ local function sendWebhook(url, isTest)
         end
         table.insert(embed.fields, {
             ["name"] = "📋 Player List",
-            ["value"] = table.concat(
+            ["value"] = table.concat(playerNames, "\n"),
+            ["inline"] = false
+        })
+    end
+    
+    local data = {
+        ["username"] = "Fish It Monitor",
+        ["avatar_url"] = "https://tr.rbxcdn.com/cb7e5adc9cac8bcd85e6a3eaeff4b42e/150/150/Image/Png",
+        ["embeds"] = {embed}
+    }
+    
+    local success, response = pcall(function()
+        return request({
+            Url = url,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+    
+    return success, response
+end
+
+-- Function to show notification
+local function showNotification(title, text, duration)
+    StarterGui:SetCore("SendNotification", {
+        Title = title,
+        Text = text,
+        Duration = duration or 5,
+    })
+end
+
+-- Minimize/Maximize Functions
+local function minimizeGUI(gui)
+    isMinimized = true
+    
+    -- Animate main frame out
+    tweenSize(gui.MainFrame, UDim2.new(0, 0, 0, 0), 0.3)
+    tweenTransparency(gui.Shadow, 1, 0.2)
+    
+    wait(0.3)
+    gui.MainFrame.Visible = false
+    
+    -- Show minimized icon with animation
+    gui.MinimizedIcon.Visible = true
+    gui.MinimizedIcon.Size = UDim2.new(0, 0, 0, 0)
+    tweenSize(gui.MinimizedIcon, UDim2.new(0, 60, 0, 60), 0.3)
+    
+    showNotification("📦 Minimized", "Click the icon to restore", 3)
+end
+
+local function maximizeGUI(gui)
+    isMinimized = false
+    
+    -- Hide minimized icon with animation
+    tweenSize(gui.MinimizedIcon, UDim2.new(0, 0, 0, 0), 0.3)
+    
+    wait(0.3)
+    gui.MinimizedIcon.Visible = false
+    
+    -- Show main frame with animation
+    gui.MainFrame.Visible = true
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    local guiWidth = math.min(450 * baseSize, screenSize.X * 0.9)
+    local guiHeight = math.min(580 * baseSize, screenSize.Y * 0.85)
+    
+    gui.MainFrame.Size = UDim2.new(0, 0, 0, 0)
+    tweenSize(gui.MainFrame, UDim2.new(0, guiWidth, 0, guiHeight), 0.3)
+    tweenTransparency(gui.Shadow, 0.7, 0.2)
+end
+
+-- Main execution
+local gui = createGUI()
+
+-- Minimize button functionality
+gui.MinimizeButton.MouseButton1Click:Connect(function()
+    minimizeGUI(gui)
+end)
+
+-- Minimized icon click to restore
+gui.MinimizedIcon.MouseButton1Click:Connect(function()
+    maximizeGUI(gui)
+end)
+
+-- Close button functionality
+gui.CloseButton.MouseButton1Click:Connect(function()
+    tweenSize(gui.MainFrame, UDim2.new(0, 0, 0, 0), 0.3)
+    wait(0.3)
+    gui.ScreenGui:Destroy()
+    monitoringEnabled = false
+end)
+
+-- Test webhook button
+gui.TestButton.MouseButton1Click:Connect(function()
+    local url = gui.WebhookInput.Text
+    
+    if url == "" or not url:match("discord.com/api/webhooks") then
+        showNotification("❌ Error", "Please enter a valid Discord webhook URL!", 5)
+        return
+    end
+    
+    gui.TestButton.Text = "⏳ SENDING..."
+    gui.TestButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+    
+    local success, response = sendWebhook(url, true)
+    
+    wait(0.5)
+    
+    if success then
+        showNotification("✅ Success", "Test webhook sent successfully!", 5)
+        gui.TestButton.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+    else
+        showNotification("❌ Error", "Failed to send webhook. Check your URL!", 5)
+        gui.TestButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        wait(2)
+        gui.TestButton.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+    end
+    
+    gui.TestButton.Text = "🔔 TEST"
+end)
+
+-- Toggle monitoring button
+gui.ToggleButton.MouseButton1Click:Connect(function()
+    if not monitoringEnabled then
+        local url = gui.WebhookInput.Text
+        local intervalText = gui.IntervalInput.Text
+        
+        if url == "" or not url:match("discord.com/api/webhooks") then
+            showNotification("❌ Error", "Please enter a valid Discord webhook URL!", 5)
+            return
+        end
+        
+        local intervalMinutes = tonumber(intervalText)
+        if not intervalMinutes or intervalMinutes < 1 then
+            showNotification("❌ Error", "Please enter a valid interval (minimum 1 minute)!", 5)
+            return
+        end
+        
+        webhookURL = url
+        notificationInterval = intervalMinutes * 60
+        monitoringEnabled = true
+        lastNotificationTime = 0
+        
+        gui.ToggleButton.Text = "⏸ STOP"
+        gui.ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        gui.WebhookInput.TextEditable = false
+        gui.IntervalInput.TextEditable = false
+        gui.StatusLabel.Text = "✅ Status: Active - Monitoring players"
+        gui.StatusLabel.TextColor3 = Color3.fromRGB(50, 200, 100)
+        
+        showNotification("✅ Started", "Monitoring enabled! Interval: " .. intervalMinutes .. " min", 5)
+    else
+        monitoringEnabled = false
+        
+        gui.ToggleButton.Text = "▶ START"
+        gui.ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 80)
+        gui.WebhookInput.TextEditable = true
+        gui.IntervalInput.TextEditable = true
+        gui.StatusLabel.Text = "⏸ Status: Idle"
+        gui.StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        
+        showNotification("⏹ Stopped", "Monitoring disabled!", 3)
+    end
+end)
+
+-- Update player list every 2 seconds
+spawn(function()
+    while wait(2) do
+        if gui.ScreenGui.Parent then
+            updatePlayerListDisplay(gui)
+        else
+            break
+        end
+    end
+end)
+
+-- Monitor and send webhooks
+spawn(function()
+    while wait(1) do
+        if not gui.ScreenGui.Parent then
+            break
+        end
+        
+        if monitoringEnabled then
+            local currentTime = tick()
+            
+            if currentTime - lastNotificationTime >= notificationInterval then
+                local success = sendWebhook(webhookURL, false)
+                
+                if success then
+                    lastNotificationTime = currentTime
+                    showNotification("📤 Sent", "Player update sent to Discord!", 3)
+                else
+                    showNotification("⚠ Warning", "Failed to send webhook!", 3)
+                end
+            end
+        end
+    end
+end)
+
+-- Player join/leave notifications
+Players.PlayerAdded:Connect(function(player)
+    wait(0.5)
+    updatePlayerListDisplay(gui)
+    showNotification("👋 Player Joined", player.Name .. " joined the server!", 3)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    showNotification("👋 Player Left", player.Name .. " left the server!", 3)
+    wait(0.5)
+    updatePlayerListDisplay(gui)
+end)
+
+-- Handle screen resize for responsive design
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    if not isMinimized then
+        local screenSize = workspace.CurrentCamera.ViewportSize
+        local guiWidth = math.min(450 * baseSize, screenSize.X * 0.9)
+        local guiHeight = math.min(580 * baseSize, screenSize.Y * 0.85)
+        
+        tweenSize(gui.MainFrame, UDim2.new(0, guiWidth, 0, guiHeight), 0.2)
+    end
+end)
+
+-- Initial update
+updatePlayerListDisplay(gui)
+
+-- Success notification with animation
+wait(0.1)
+showNotification("✅ Fish It Monitor", "Script loaded! Buttons are now visible and scrollable!", 5)
+
+print("Fish It Player Monitor FIXED VERSION loaded!")
+print("✅ Added ScrollingFrame for player list")
+print("✅ Buttons repositioned and fully visible")
+print("Compatible with: Delta Executor, Mobile & Desktop")
